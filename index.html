@@ -644,6 +644,29 @@
     </div>
   </section>
 
+  <!-- ═══ INSTALL BANNER (Floating) ═══ -->
+  <div id="installBanner" class="fixed bottom-6 left-4 right-4 z-50 hidden" dir="rtl">
+    <div class="max-w-md mx-auto bg-white rounded-2xl shadow-2xl shadow-navy-500/20 border border-gray-100 p-4 flex items-center gap-4" style="animation: fadeInUp 0.5s ease-out;">
+      <!-- App Icon -->
+      <div class="w-12 h-12 rounded-xl gradient-bg flex items-center justify-center shrink-0">
+        <span class="text-white font-black text-lg">ب</span>
+      </div>
+      <!-- Text -->
+      <div class="flex-1 min-w-0">
+        <div class="font-bold text-navy-500 text-sm">تثبيت تطبيق بسمة</div>
+        <div class="text-gray-400 text-xs mt-0.5">أضف التطبيق لشاشتك الرئيسية</div>
+      </div>
+      <!-- Install Button -->
+      <button id="installBtn" class="bg-teal-500 hover:bg-teal-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition shrink-0">
+        تثبيت
+      </button>
+      <!-- Close -->
+      <button id="installClose" class="text-gray-300 hover:text-gray-500 transition p-1 shrink-0" aria-label="إغلاق">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+  </div>
+
   <!-- ═══ FOOTER ═══ -->
   <footer class="bg-navy-700 text-white/50 py-8 text-center text-sm">
     <div class="max-w-7xl mx-auto px-4">
@@ -691,10 +714,76 @@
     // ── PWA Service Worker ──
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').then(() => {
+        // Try repo subfolder path first (GitHub Pages), fallback to root
+        navigator.serviceWorker.register('./sw.js').then(() => {
           console.log('SW registered');
-        }).catch(() => {});
+        }).catch(() => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
       });
+    }
+
+    // ── PWA Install Prompt ──
+    let deferredPrompt = null;
+    const installBanner = document.getElementById('installBanner');
+    const installBtn = document.getElementById('installBtn');
+    const installClose = document.getElementById('installClose');
+
+    // Catch the browser's install prompt
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      // Show banner after 3 seconds (not immediately — less intrusive)
+      setTimeout(() => {
+        if (!localStorage.getItem('pwa-install-dismissed')) {
+          installBanner.classList.remove('hidden');
+        }
+      }, 3000);
+    });
+
+    // Install button click
+    if (installBtn) {
+      installBtn.addEventListener('click', async () => {
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          const result = await deferredPrompt.userChoice;
+          if (result.outcome === 'accepted') {
+            installBanner.classList.add('hidden');
+          }
+          deferredPrompt = null;
+        }
+      });
+    }
+
+    // Close button — hide and remember for this session
+    if (installClose) {
+      installClose.addEventListener('click', () => {
+        installBanner.classList.add('hidden');
+        localStorage.setItem('pwa-install-dismissed', 'true');
+      });
+    }
+
+    // Hide banner if already installed
+    window.addEventListener('appinstalled', () => {
+      installBanner.classList.add('hidden');
+      deferredPrompt = null;
+    });
+
+    // For iOS — show manual instructions (no beforeinstallprompt on Safari)
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+    if (isIOS && !isStandalone && !localStorage.getItem('pwa-install-dismissed')) {
+      setTimeout(() => {
+        const iosBanner = document.getElementById('installBanner');
+        const iosBtn = document.getElementById('installBtn');
+        if (iosBanner && iosBtn) {
+          iosBtn.textContent = 'كيف؟';
+          iosBtn.addEventListener('click', () => {
+            alert('لتثبيت التطبيق:\n\n1. اضغط على أيقونة المشاركة (⬆️) أسفل المتصفح\n2. اختر "إضافة إلى الشاشة الرئيسية"\n3. اضغط "إضافة"');
+          }, { once: true });
+          iosBanner.classList.remove('hidden');
+        }
+      }, 3000);
     }
 
     // ── Navbar Background on Scroll ──
