@@ -653,12 +653,12 @@
       </div>
       <!-- Text -->
       <div class="flex-1 min-w-0">
-        <div class="font-bold text-navy-500 text-sm">تثبيت تطبيق بسمة</div>
-        <div class="text-gray-400 text-xs mt-0.5">أضف التطبيق لشاشتك الرئيسية</div>
+        <div class="font-bold text-navy-500 text-sm">أضف بسمة لجوالك</div>
+        <div class="text-gray-400 text-xs mt-0.5">وصول سريع بدون متصفح</div>
       </div>
       <!-- Install Button -->
-      <button id="installBtn" class="bg-teal-500 hover:bg-teal-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition shrink-0">
-        تثبيت
+      <button id="installBtn" class="bg-teal-500 hover:bg-teal-600 text-white text-sm font-bold px-5 py-2.5 rounded-xl transition shrink-0">
+        أضف
       </button>
       <!-- Close -->
       <button id="installClose" class="text-gray-300 hover:text-gray-500 transition p-1 shrink-0" aria-label="إغلاق">
@@ -714,36 +714,48 @@
     // ── PWA Service Worker ──
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        // Try repo subfolder path first (GitHub Pages), fallback to root
-        navigator.serviceWorker.register('./sw.js').then(() => {
+        navigator.serviceWorker.register('./sw.js', { scope: './' }).then(() => {
           console.log('SW registered');
-        }).catch(() => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        }).catch((err) => {
+          console.log('SW registration failed:', err);
         });
       });
     }
 
-    // ── PWA Install Prompt ──
+    // ── PWA Install ──
     let deferredPrompt = null;
     const installBanner = document.getElementById('installBanner');
     const installBtn = document.getElementById('installBtn');
     const installClose = document.getElementById('installClose');
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isAndroid = /Android/.test(navigator.userAgent);
+    const isChrome = /Chrome/.test(navigator.userAgent) && !/Edge|OPR/.test(navigator.userAgent);
+    const dismissed = localStorage.getItem('pwa-install-dismissed');
 
-    // Catch the browser's install prompt
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      deferredPrompt = e;
-      // Show banner after 3 seconds (not immediately — less intrusive)
+    // Don't show if already installed or dismissed
+    if (!isStandalone && !dismissed) {
+
+      // ── Android/Chrome: catch native install prompt ──
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        setTimeout(() => { installBanner.classList.remove('hidden'); }, 2000);
+      });
+
+      // ── Fallback: show banner with manual instructions after 4s ──
+      // (for browsers that don't fire beforeinstallprompt)
       setTimeout(() => {
-        if (!localStorage.getItem('pwa-install-dismissed')) {
+        if (!deferredPrompt && !isStandalone) {
           installBanner.classList.remove('hidden');
         }
-      }, 3000);
-    });
+      }, 4000);
+    }
 
     // Install button click
     if (installBtn) {
       installBtn.addEventListener('click', async () => {
+        // Case 1: Native prompt available (Chrome Android/Desktop)
         if (deferredPrompt) {
           deferredPrompt.prompt();
           const result = await deferredPrompt.userChoice;
@@ -751,11 +763,58 @@
             installBanner.classList.add('hidden');
           }
           deferredPrompt = null;
+          return;
         }
+
+        // Case 2: iOS Safari
+        if (isIOS) {
+          showInstallGuide(
+            'لتثبيت التطبيق على الآيفون:',
+            '1. اضغط على أيقونة المشاركة ⬆️ أسفل الشاشة\n2. مرر للأسفل واختر "إضافة إلى الشاشة الرئيسية"\n3. اضغط "إضافة"'
+          );
+          return;
+        }
+
+        // Case 3: Android Chrome (beforeinstallprompt didn't fire yet)
+        if (isAndroid && isChrome) {
+          showInstallGuide(
+            'لتثبيت التطبيق:',
+            '1. اضغط على ⋮ (ثلاث نقاط) أعلى يسار المتصفح\n2. اختر "إضافة إلى الشاشة الرئيسية" أو "تثبيت التطبيق"\n3. اضغط "تثبيت"'
+          );
+          return;
+        }
+
+        // Case 4: Other browsers
+        showInstallGuide(
+          'لتثبيت التطبيق:',
+          '1. افتح هذا الموقع في متصفح Chrome\n2. اضغط على القائمة ⋮\n3. اختر "تثبيت التطبيق" أو "إضافة إلى الشاشة الرئيسية"'
+        );
       });
     }
 
-    // Close button — hide and remember for this session
+    // Show install guide modal
+    function showInstallGuide(title, steps) {
+      // Create overlay
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 z-[60] bg-black/50 flex items-end sm:items-center justify-center p-4';
+      overlay.style.animation = 'fadeInUp 0.3s ease-out';
+      overlay.innerHTML = `
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-full text-right" dir="rtl">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center shrink-0">
+              <span class="text-white font-black">ب</span>
+            </div>
+            <h3 class="font-bold text-gray-800">${title}</h3>
+          </div>
+          <p class="text-gray-600 text-sm leading-loose whitespace-pre-line mb-5">${steps}</p>
+          <button onclick="this.closest('.fixed').remove()" class="w-full bg-teal-500 text-white font-bold py-3 rounded-xl hover:bg-teal-600 transition">فهمت</button>
+        </div>
+      `;
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+      document.body.appendChild(overlay);
+    }
+
+    // Close button
     if (installClose) {
       installClose.addEventListener('click', () => {
         installBanner.classList.add('hidden');
@@ -763,28 +822,11 @@
       });
     }
 
-    // Hide banner if already installed
+    // Auto-hide after install
     window.addEventListener('appinstalled', () => {
       installBanner.classList.add('hidden');
       deferredPrompt = null;
     });
-
-    // For iOS — show manual instructions (no beforeinstallprompt on Safari)
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-    if (isIOS && !isStandalone && !localStorage.getItem('pwa-install-dismissed')) {
-      setTimeout(() => {
-        const iosBanner = document.getElementById('installBanner');
-        const iosBtn = document.getElementById('installBtn');
-        if (iosBanner && iosBtn) {
-          iosBtn.textContent = 'كيف؟';
-          iosBtn.addEventListener('click', () => {
-            alert('لتثبيت التطبيق:\n\n1. اضغط على أيقونة المشاركة (⬆️) أسفل المتصفح\n2. اختر "إضافة إلى الشاشة الرئيسية"\n3. اضغط "إضافة"');
-          }, { once: true });
-          iosBanner.classList.remove('hidden');
-        }
-      }, 3000);
-    }
 
     // ── Navbar Background on Scroll ──
     const navbar = document.getElementById('navbar');
